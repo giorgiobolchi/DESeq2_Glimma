@@ -1,0 +1,259 @@
+---
+title: "DESeq2+Glimma"
+author: "Giorgio Bolchi"
+date: "5/6/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval= TRUE)
+setwd("~/Library/Mobile Documents/com~apple~CloudDocs/Academics (iCloud)/S8/Internship - Azolla Lab/(1) cornicinine/DESeq2+Glimma markdown/")
+
+```
+
+---
+
+## Description
+
+This script is a combination of the **DESeq2** Differential Gene Expression Analysis tool and the **Glimma** interactive html graphic tool available through **Bioconductor**.
+
+![](screenshot_glimma.png)
+
+
+
+### Sources:
+
+DESeq2: 
+
+<ul>
+<li> https://github.com/mikelove/DESeq2/li>
+<li>https://www.bioconductor.org/packages/release/bioc/manuals/DESeq2/man/DESeq2.pdf (manual)</li>
+</ul>
+
+Glimma:
+<ul>
+<li> https://github.com/Shians/Glimma </li>
+<li> https://bioconductor.org/packages/release/bioc/manuals/Glimma/man/Glimma.pdf (manual)</li>
+</ul>
+
+---
+
+## Script
+
+<br/>
+
+#### Load libraries
+
+(If not installed yet)
+
+```{r, eval= FALSE}
+install.packages("BiocManager")
+BiocManager::install("DESeq2")
+BiocManager::install("Glimma")
+```
+
+```{r, include=FALSE}
+library("DESeq2")
+library("Glimma")
+```
+
+```{r, eval=FALSE}
+library("DESeq2")
+library("Glimma")
+```
+
+<br/>
+
+#### Load data
+
+Replace _YOUR_COUNTS_DATA.csv_ by your raw counts .csv file. If necessary, change the separation character to match your file.
+```{r}
+countData <- read.csv('YOUR_COUNTS_DATA.csv', header = TRUE, sep = ",") 
+```
+
+Replace _YOUR_METADATA.csv_ by your metadata .csv file (with sample ids, and treatment names).
+```{r}
+colData <- read.csv('YOUR_METADATA.csv', header = TRUE, sep = ",",) 
+colnames(colData)<-c("id","group")
+```
+
+<br/>
+
+### DESeq2
+
+Construct DESeqDataset object
+```{r}
+dds <- DESeqDataSetFromMatrix(countData=countData,
+                              colData=colData,
+                              design=~group, 
+                              tidy = TRUE)
+```
+
+
+Run DESeq function
+```{r}
+dds <- DESeq(dds) 
+```
+
+<br/>
+
+Extract results in a new dataframe. Make sure to change the *treatment* and *control* to your own.
+```{r}
+res <- results(dds, contrast=c("group", "treatment", "control"))
+
+```
+
+It is possible to already export these results as a .csv file for further analysis in other programs.
+```{r}
+write.csv(as.data.frame(res), file="results.csv")
+```
+The file would look like this.
+```{r}
+head(read.csv("results.csv"))
+```
+
+<br/>
+
+Sanity summary check.
+```{r}
+summary(res)
+```
+Head the results by padj.
+```{r}
+head(res[order(res$padj),], n=5) 
+```
+
+<br/>
+
+#### PCA
+Using the DESEQ2 plotPCA
+```{r}
+vsdata <- vst(dds, blind=FALSE, fitType = c("local"))
+```
+```{r}
+plotPCA(vsdata, intgroup="group")
+```
+
+
+<br/>
+
+#### Plot gene expression
+
+The boundaries of the plot are set to the minimum and maximum log2FoldChange.
+```{r}
+plotMA(res, ylim= c(min(res$log2FoldChange, na.rm=TRUE), max(res$log2FoldChange, na.rm=TRUE))) 
+
+```
+\
+
+Further down, it will be possible to interact and explore the data behind this figure (here static) with the Glimma html interface.
+
+<br/>
+
+### Glimma
+
+The Glimma tool requires the data to be reshaped in a few dataframes so that they can be correctly plotted. First of all, an _anno_ dataframe that will contain the data and respective annotations of the interactive  plot.
+
+```{r}
+anno <- as.data.frame(res)
+```
+
+```{r}
+anno$GeneID <- row.names.data.frame(anno) # Add GeneID as a column instead of just the rownames so that the glMDPlot() function can read and annotate the GeneIDs on the graph.
+```
+
+
+<br/>
+
+#### Connect GeneNames to GeneIDs
+
+As so far only the GeneIDs have been included in the datasets (e.g. _Afi_v2_s28G002430.2_), it would be more convenient to also add the respective GeneNames (e.g. _'transcription factor (bHLH)'_) and descriptions (e.g. _'RNA biosynthesis.transcriptional regulation'_). \
+\
+In this case the respective names and descriptions are located in an external .csv file _GENENAMES.csv_ , preferably with the following columns: GeneID, GeneName, GeneDescription.
+
+```{r}
+gene_names <- read.csv('GENENAMES.csv', header = TRUE, sep = ",",) 
+
+anno<- cbind(anno, GeneName = "") # add a new empty column for Gene Names in the anno dataframe
+anno<- cbind(anno, GeneDescription = "") # add a new empty column for Gene Descriptions in the anno dataframe
+```
+
+In order to connect the _GeneNames_ and _GeneDescriptions_ to the respectively correspondent _GeneIDs_ in the _anno_ dataframe, we use the following loop.
+```{r}
+i=0
+p=0
+
+for (i in 1:nrow(anno)){      
+  
+  anno[i,8] <- gene_names[(which(gene_names$GeneID == anno[i,7])) # the which() function gives the rowname where gene_names$GeneID is equal to the GeneID in the anno file.
+                          ,3] # 3 = GeneID column  of the gene_names file
+  
+  anno[i,9] <- gene_names[(which(gene_names$GeneID == anno[i,7]))
+                          ,4] # 4 = DESCRIPTION column  of the gene_names file
+  
+  #It should take a minute or so.
+}
+
+```
+
+
+<br/>
+
+#### glMDPlot
+
+
+A few more subsets have to be defined in order to generate the interactive Glimma plot.
+
+```{r}
+padj <- res[, 'padj'] # subset the padj column from the results
+```
+```{r}
+padj[ is.na(padj) ] <- 1 # NA values are replaced by '1' values.
+```
+```{r}
+status <- as.numeric(padj < 0.01) # the status file gathers together all the padj values smaller than 0.01. It will be used by the glMDPlot() function. It is a vector giving the control status of the the data points.
+
+# note: it is possible to modify the threshold of the padj filter. Here, only the the datapoints with a padj < 0.01 will be highlighted.
+```
+Here the padj threshold is set to 0.01 (all the datapoints below this threshold will appear in red on the graph, all the others will stay grey)
+\
+
+```{r}
+groups <- colData(dds)[ ,'group'] # which experimental factors to take along
+```
+```{r}
+colors <- c('blue', 'blue', 'blue', 'green', 'green', 'green') #  color of the triplicat points. Here the 3 first all in the same group (treatment), the 3 others are in the compared group (control).
+```
+```{r}
+display <- c("GeneID","GeneName","GeneDescription", "stat","pvalue") # which annotation (from mcols(dds) ) and numeric data to show. Note: the logMean, logFC and padj are always automatically added anyway.
+```
+
+<br/>
+
+Finally, we can generate the plot.
+```{r}
+
+glMDPlot(res,
+         status=status,
+         counts=counts(dds),
+         samples=colnames(dds),
+         sample.cols=colors,
+         anno=anno,
+         groups=groups,
+         display.columns=display,
+         html='plot_Glimma', # output name
+         launch= FALSE) # if TRUE, will launch the html interactive plot right after its generation.
+```
+
+
+![](screenshot_glimma.png)
+
+\
+
+The output objecti is a folder containing the html interactive plot file. \
+On the plot, it is possible to browse through the datapoints, search for a specific gene, sort by foldchange or padj, etc..
+
+
+
